@@ -286,10 +286,16 @@ jobs:
         ls -la service-account.json
         file service-account.json
         
-        # Upload to Firebase App Distribution with enhanced error handling
+        # Use groups parameter if you have testing groups configured
+        GROUPS_PARAM=""
+        if [ -n "$FIREBASE_TEST_GROUPS" ]; then
+          GROUPS_PARAM="--groups $FIREBASE_TEST_GROUPS"
+        fi
+        
+        # Upload to Firebase App Distribution using GOOGLE_APPLICATION_CREDENTIALS
         firebase appdistribution:distribute "$IPA_PATH" \
           --app "$FIREBASE_APP_ID" \
-          --token "$(cat service-account.json)" \
+          $GROUPS_PARAM \
           --release-notes "🚀 RunBuilder iOS Build #${{ github.run_number }}
         
         📋 What's New: ${{ github.event.inputs.release_notes || 'Auto-rebuild to prevent expiration' }}
