@@ -1,0 +1,356 @@
+name: iOS Firebase Distribution
+
+on:
+  workflow_dispatch:  # Manual trigger only - YOU control when to build
+    inputs:
+      release_notes:
+        description: 'Release notes for this build'
+        required: false
+        default: 'Latest updates and improvements'
+  # Optional: Add schedule for automatic builds
+  # schedule:
+  #   - cron: '0 12 */6 * *'  # Auto-rebuild every 6 days to prevent expiration
+
+jobs:
+  build-ios:
+    name: Build & Distribute iOS App
+    runs-on: macos-14  # Use specific macOS version instead of latest
+    
+    steps:
+    - name: Checkout private repository
+      uses: actions/checkout@v4
+      with:
+        repository: OscarW99/runbuilder
+        token: ${{ secrets.PRIVATE_REPO_PAT }}  # PAT with repo access to private repo
+        path: private-repo
+        
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+      with:
+        channel: 'stable'
+        
+    - name: Install dependencies
+      run: |
+        cd private-repo/runbuilder
+        flutter pub get
+        
+    - name: Auto-increment Version and Build Number
+      run: |
+        cd private-repo/runbuilder
+        
+        # Get current version from pubspec.yaml
+        CURRENT_VERSION=$(grep "^version:" pubspec.yaml | cut -d' ' -f2)
+        echo "Current version: $CURRENT_VERSION"
+        
+        # Extract version number and build number
+        VERSION_NUMBER=$(echo $CURRENT_VERSION | cut -d'+' -f1)
+        BUILD_NUMBER=$(echo $CURRENT_VERSION | cut -d'+' -f2)
+        
+        echo "Current version number: $VERSION_NUMBER"
+        echo "Current build number: $BUILD_NUMBER"
+        
+        # Extract major, minor, patch from version number (e.g., 1.0.1 -> 1, 0, 1)
+        MAJOR=$(echo $VERSION_NUMBER | cut -d'.' -f1)
+        MINOR=$(echo $VERSION_NUMBER | cut -d'.' -f2)
+        PATCH=$(echo $VERSION_NUMBER | cut -d'.' -f3)
+        
+        # Auto-increment patch version every deployment
+        NEW_PATCH=$((PATCH + 1))
+        NEW_VERSION_NUMBER="${MAJOR}.${MINOR}.${NEW_PATCH}"
+        
+        # Reset build number to 1 for new version, or increment if version unchanged
+        NEW_BUILD_NUMBER=1
+        NEW_VERSION="${NEW_VERSION_NUMBER}+${NEW_BUILD_NUMBER}"
+        
+        echo "New version: $NEW_VERSION (patch incremented from $PATCH to $NEW_PATCH)"
+        
+        # Update pubspec.yaml
+        sed -i.bak "s/^version: .*/version: $NEW_VERSION/" pubspec.yaml
+        
+        # Verify the change
+        echo "Updated pubspec.yaml:"
+        grep "^version:" pubspec.yaml
+        
+    - name: Clean and Setup iOS Pods
+      run: |
+        cd private-repo/runbuilder/ios
+        # Clean existing pods installation
+        rm -rf Pods
+        rm -rf Podfile.lock
+        # Install pods with repo update - this will apply our Podfile post_install hook
+        pod install --repo-update
+        
+        # Verify that our post_install hook worked - check pod signing settings
+        echo "=== Verifying Pod Code Signing Settings ==="
+        grep -A 5 -B 5 "CODE_SIGN_STYLE" Pods/Pods.xcodeproj/project.pbxproj | head -20 || echo "No CODE_SIGN_STYLE found (which is expected for automatic signing)"
+        
+    - name: Setup Environment File
+      run: |
+        cd private-repo/runbuilder
+        echo "GOOGLE_MAPS_API_KEY=${{ secrets.GOOGLE_MAPS_API_KEY }}" > .env
+        echo "STRAVA_CLIENT_ID=${{ secrets.STRAVA_CLIENT_ID }}" >> .env
+        echo "STRAVA_CLIENT_SECRET=${{ secrets.STRAVA_CLIENT_SECRET }}" >> .env
+        echo "Environment file created with API keys"
+        
+    - name: Setup Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: latest-stable
+        
+    - name: Build iOS App
+      run: |
+        cd private-repo/runbuilder
+        
+        # Extract version info from pubspec.yaml
+        VERSION_LINE=$(grep "^version:" pubspec.yaml)
+        VERSION_NUMBER=$(echo $VERSION_LINE | cut -d' ' -f2 | cut -d'+' -f1)
+        BUILD_NUMBER=$(echo $VERSION_LINE | cut -d'+' -f2)
+        
+        echo "Building with version: $VERSION_NUMBER, build: $BUILD_NUMBER"
+        
+        # Build iOS with proper versioning
+        flutter build ios --release --no-codesign \
+          --build-name="$VERSION_NUMBER" \
+          --build-number="$BUILD_NUMBER"
+        
+    - name: Install Apple Certificate and Provisioning Profile
+      env:
+        BUILD_CERTIFICATE_BASE64: ${{ secrets.BUILD_CERTIFICATE_BASE64 }}
+        P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+        BUILD_PROVISION_PROFILE_BASE64: ${{ secrets.BUILD_PROVISION_PROFILE_BASE64 }}
+        KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+      run: |
+        # Create variables
+        CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+        PP_PATH=$RUNNER_TEMP/build_pp.mobileprovision
+        KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+        # Import certificate and provisioning profile from secrets
+        echo "$BUILD_CERTIFICATE_BASE64" | base64 --decode > $CERTIFICATE_PATH
+        echo "$BUILD_PROVISION_PROFILE_BASE64" | base64 --decode > $PP_PATH
+
+        # DEBUG: Check if P12 file was decoded correctly
+        echo "=== P12 File Debug ==="
+        file $CERTIFICATE_PATH
+        ls -la $CERTIFICATE_PATH
+        echo "Trying to verify P12 file with openssl..."
+        P12_PASSWORD_CLEAN=$(echo "$P12_PASSWORD" | tr -d '\n\r' | tr -d ' ')
+        openssl pkcs12 -info -in $CERTIFICATE_PATH -noout -passin pass:"$P12_PASSWORD_CLEAN" || echo "P12 verification failed"
+        
+        # FIX: Convert P12 to macOS-compatible format using OpenSSL
+        echo "=== Converting P12 to macOS-compatible format ==="
+        openssl pkcs12 -in $CERTIFICATE_PATH -out /tmp/temp_cert.pem -clcerts -nokeys -passin pass:"$P12_PASSWORD_CLEAN"
+        openssl pkcs12 -in $CERTIFICATE_PATH -out /tmp/temp_key.pem -nocerts -nodes -passin pass:"$P12_PASSWORD_CLEAN"
+        openssl pkcs12 -export -out /tmp/fixed_certificate.p12 -in /tmp/temp_cert.pem -inkey /tmp/temp_key.pem -passin pass:"$P12_PASSWORD_CLEAN" -passout pass:"$P12_PASSWORD_CLEAN" -name "iOS Distribution"
+        
+        # Use the fixed P12 file
+        CERTIFICATE_PATH=/tmp/fixed_certificate.p12
+
+        # Create temporary keychain
+        security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+        security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+        security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+        # Import certificate to keychain (with proper password cleaning)
+        P12_PASSWORD_CLEAN=$(echo "$P12_PASSWORD" | tr -d '\n\r' | tr -d ' ')
+        security import $CERTIFICATE_PATH -P "$P12_PASSWORD_CLEAN" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+        security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+        security list-keychain -d user -s $KEYCHAIN_PATH
+
+        # Apply provisioning profile
+        mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+        cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles
+
+        # Extract provisioning profile UUID for later use
+        PROFILE_UUID=$(security cms -D -i $PP_PATH | plutil -extract UUID xml1 -o - - | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p')
+        echo "PROFILE_UUID=$PROFILE_UUID" >> $GITHUB_ENV
+        echo "Provisioning Profile UUID: $PROFILE_UUID"
+
+    - name: Debug Code Signing Setup
+      run: |
+        echo "=== Available Code Signing Identities ==="
+        security find-identity -v -p codesigning
+        echo ""
+        echo "=== Installed Provisioning Profiles ==="
+        ls -la ~/Library/MobileDevice/Provisioning\ Profiles/
+        echo ""
+        echo "=== Profile UUID ==="
+        echo "PROFILE_UUID: $PROFILE_UUID"
+        echo ""
+        echo "=== Certificate Details ==="
+        security find-identity -v -p codesigning | grep "5GNC2JSW59" || echo "No certificate found for team 5GNC2JSW59"
+        echo ""
+        echo "=== Provisioning Profile Details ==="
+        security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision | head -50
+        echo ""
+        echo "=== Check Certificate in NEW Profile ==="
+        security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision | grep -A 20 -B 5 "DeveloperCertificates"
+        echo ""
+        echo "=== Current Certificate SHA1 ==="
+        security find-identity -v -p codesigning | grep "5GNC2JSW59"
+
+    - name: Build and Sign IPA with Fresh Certificates
+      run: |
+        cd private-repo/runbuilder
+        
+        # Find the correct signing identity
+        SIGNING_IDENTITY=$(security find-identity -v -p codesigning | grep "5GNC2JSW59" | head -1 | cut -d '"' -f 2)
+        echo "Using signing identity: $SIGNING_IDENTITY"
+        
+        # Reinstall pods to apply Podfile signing changes
+        echo "=== Reinstalling Pods to Apply Signing Changes ==="
+        cd ios
+        pod install
+        cd ..
+        
+        # Build without global signing settings - let individual targets handle their own signing
+        echo "=== Building with Target-Specific Signing ==="
+        xcodebuild -workspace ios/Runner.xcworkspace \
+                   -scheme Runner \
+                   -configuration Release \
+                   -destination generic/platform=iOS \
+                   -archivePath build/Runner.xcarchive \
+                   clean archive
+        
+        # Create export options plist for ad-hoc distribution
+        cat > build/ExportOptions.plist << EOF
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+        <plist version="1.0">
+        <dict>
+            <key>method</key>
+            <string>ad-hoc</string>
+            <key>teamID</key>
+            <string>5GNC2JSW59</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+                <key>com.oscarw99.runbuilder</key>
+                <string>$PROFILE_UUID</string>
+            </dict>
+        </dict>
+        </plist>
+        EOF
+                   
+        # Export IPA
+        xcodebuild -exportArchive \
+                   -archivePath build/Runner.xcarchive \
+                   -exportPath build/ \
+                   -exportOptionsPlist build/ExportOptions.plist
+        
+        # Debug: Check what files were created
+        echo "=== Files in build directory after export ==="
+        ls -la build/
+        echo "=== Looking for IPA files ==="
+        find build/ -name "*.ipa" -type f
+        
+        # Find the actual IPA file and get the absolute path
+        IPA_FILE=$(find build/ -name "*.ipa" -type f | head -1)
+        if [ -z "$IPA_FILE" ]; then
+            echo "ERROR: No IPA file found!"
+            exit 1
+        fi
+        
+        # Convert to absolute path to avoid path issues
+        IPA_ABSOLUTE_PATH=$(realpath "$IPA_FILE")
+        echo "Found IPA file: $IPA_FILE"
+        echo "Absolute IPA path: $IPA_ABSOLUTE_PATH"
+        echo "IPA_PATH=$IPA_ABSOLUTE_PATH" >> $GITHUB_ENV
+                   
+    - name: Upload IPA as Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: RunBuilder-iOS-${{ github.run_number }}
+        path: ${{ env.IPA_PATH }}
+        retention-days: 30
+        
+    - name: Install Firebase CLI
+      run: |
+        npm install -g firebase-tools
+        
+    - name: Upload to Firebase App Distribution  
+      env:
+        FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+        FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+      run: |
+        # Create service account file
+        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service-account.json
+        
+        # Authenticate with Firebase (no need to set project - we'll specify it in commands)
+        export GOOGLE_APPLICATION_CREDENTIALS="service-account.json"
+        
+        # Debug Firebase setup
+        echo "=== Firebase Project Setup ==="
+        firebase projects:list || echo "Failed to list projects - check service account permissions"
+        
+        # Debug current working directory and IPA path
+        echo "=== Current working directory ==="
+        pwd
+        echo "=== IPA_PATH environment variable ==="
+        echo "IPA_PATH: $IPA_PATH"
+        echo "=== Checking if IPA file exists ==="
+        ls -la "$IPA_PATH" || echo "IPA file not found at specified path"
+        
+        # Check if IPA exists
+        if [ ! -f "$IPA_PATH" ]; then
+            echo "ERROR: IPA file not found at $IPA_PATH"
+            echo "Looking for IPA files in private-repo/runbuilder/build/ directory..."
+            ls -la private-repo/runbuilder/build/ || echo "private-repo/runbuilder/build/ directory not found"
+            
+            # Try to find IPA file in the expected location
+            if [ -f "private-repo/runbuilder/build/runbuilder.ipa" ]; then
+                echo "Found IPA at private-repo/runbuilder/build/runbuilder.ipa, updating IPA_PATH"
+                IPA_PATH="private-repo/runbuilder/build/runbuilder.ipa"
+            else
+                echo "IPA file not found in expected location"
+                exit 1
+            fi
+        fi
+        
+        echo "Uploading IPA: $IPA_PATH"
+        
+        # Upload to Firebase App Distribution with enhanced error handling
+        firebase appdistribution:distribute "$IPA_PATH" \
+          --app ${{ secrets.FIREBASE_APP_ID }} \
+          --project ${{ secrets.FIREBASE_PROJECT_ID }} \
+          --release-notes "🚀 RunBuilder iOS Build #${{ github.run_number }}
+        
+        📋 What's New: ${{ github.event.inputs.release_notes || 'Auto-rebuild to prevent expiration' }}
+        
+        📲 Install Instructions:
+        1. Tap the download link in the email/notification
+        2. Install the app on your device
+        3. Go to Settings > General > VPN & Device Management
+        4. Trust 'Oscar Wright' developer profile
+        
+        ⏰ Note: This build expires in 7 days. A new build will be automatically created." || {
+          echo "Firebase upload failed - checking permissions and setup"
+          echo "Service account roles needed: Firebase App Distribution Admin, Editor"
+          exit 1
+        }
+          
+    - name: Create Release Notes
+      run: |
+        echo "🎉 iOS build completed successfully!" >> release_notes.txt
+        echo "📱 Build #${{ github.run_number }}" >> release_notes.txt
+        echo "� Download the IPA from GitHub Actions artifacts" >> release_notes.txt
+        echo "📋 Release Notes: ${{ github.event.inputs.release_notes || 'Auto-rebuild to prevent expiration' }}" >> release_notes.txt
+        echo "" >> release_notes.txt
+        echo "📲 Installation Instructions:" >> release_notes.txt
+        echo "1. Download the IPA file from the Actions artifacts" >> release_notes.txt
+        echo "2. Install using Xcode, TestFlight, or a device management tool" >> release_notes.txt
+        echo "3. Trust the developer profile in Settings > General > VPN & Device Management" >> release_notes.txt
+        
+    - name: Upload Release Notes
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-notes
+        path: release_notes.txt
+        
+    - name: Clean up keychain and provisioning profile
+      if: ${{ always() }}
+      run: |
+        security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+        rm -f ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision || true
