@@ -269,25 +269,38 @@ jobs:
       run: |
         npm install -g firebase-tools
         
-    - name: Upload to Firebase App Distribution
-      uses: wzieba/Firebase-Distribution-Github-Action@v1
-      with:
-        appId: ${{ secrets.FIREBASE_APP_ID }}
-        serviceCredentialsFileContent: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        groups: testers
-        file: ${{ env.IPA_PATH }}
-        releaseNotes: |
-          🚀 RunBuilder iOS Build #${{ github.run_number }}
-          
-          📋 What's New: ${{ github.event.inputs.release_notes || 'Auto-rebuild to prevent expiration' }}
-          
-          📲 Install Instructions:
-          1. Tap the download link in the email/notification
-          2. Install the app on your device
-          3. Go to Settings > General > VPN & Device Management
-          4. Trust 'Oscar Wright' developer profile
-          
-          ⏰ Note: This build expires in 7 days.
+    - name: Upload to Firebase App Distribution  
+      env:
+        FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
+        FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+      run: |
+        # Create service account file - this is the key step
+        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service-account.json
+        
+        # Set credentials file for Firebase authentication
+        export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
+        
+        # Debug service account file
+        echo "=== Service Account File Check ==="
+        ls -la service-account.json
+        file service-account.json
+        
+        # Upload to Firebase App Distribution with enhanced error handling
+        firebase appdistribution:distribute "$IPA_PATH" \
+          --app "$FIREBASE_APP_ID" \
+          --token "$(cat service-account.json)" \
+          --release-notes "🚀 RunBuilder iOS Build #${{ github.run_number }}
+        
+        📋 What's New: ${{ github.event.inputs.release_notes || 'Auto-rebuild to prevent expiration' }}
+        
+        📲 Install Instructions:
+        1. Tap the download link in the email/notification
+        2. Install the app on your device
+        3. Go to Settings > General > VPN & Device Management
+        4. Trust 'Oscar Wright' developer profile
+        
+        ⏰ Note: This build expires in 7 days. A new build will be automatically created."
           
     - name: Create Release Notes
       run: |
