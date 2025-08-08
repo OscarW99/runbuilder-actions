@@ -275,26 +275,43 @@ jobs:
         FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
       run: |
-        # Create service account file
-        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service-account.json
+        # Create service account file - use base64 encoding to avoid JSON formatting issues
+        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | base64 -d > service-account.json 2>/dev/null || echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service-account.json
         
-        # Try using gcloud auth instead of Firebase CLI auth
-        echo "=== Installing and configuring gcloud ==="
-        # Install gcloud CLI
-        curl https://sdk.cloud.google.com | bash
-        
-        # Add gcloud to PATH for this session
-        export PATH="/Users/runner/google-cloud-sdk/bin:$PATH"
-        
-        # Authenticate with service account
-        gcloud auth activate-service-account --key-file=service-account.json
-        gcloud config set project ${{ secrets.FIREBASE_PROJECT_ID }}
-        
-        # Set environment variable for Firebase CLI
+        # Authenticate with Firebase using the exact same method as private repo
         export GOOGLE_APPLICATION_CREDENTIALS="service-account.json"
         
-        echo "=== Uploading to Firebase App Distribution ==="
-        # Upload to Firebase App Distribution
+        # Debug Firebase setup
+        echo "=== Firebase Project Setup ==="
+        firebase projects:list || echo "Failed to list projects - check service account permissions"
+        
+        # Debug current working directory and IPA path
+        echo "=== Current working directory ==="
+        pwd
+        echo "=== IPA_PATH environment variable ==="
+        echo "IPA_PATH: $IPA_PATH"
+        echo "=== Checking if IPA file exists ==="
+        ls -la "$IPA_PATH" || echo "IPA file not found at specified path"
+        
+        # Check if IPA exists
+        if [ ! -f "$IPA_PATH" ]; then
+            echo "ERROR: IPA file not found at $IPA_PATH"
+            echo "Looking for IPA files in private-repo/runbuilder/build/ directory..."
+            ls -la private-repo/runbuilder/build/ || echo "private-repo/runbuilder/build/ directory not found"
+            
+            # Try to find IPA file in the expected location
+            if [ -f "private-repo/runbuilder/build/runbuilder.ipa" ]; then
+                echo "Found IPA at private-repo/runbuilder/build/runbuilder.ipa, updating IPA_PATH"
+                IPA_PATH="private-repo/runbuilder/build/runbuilder.ipa"
+            else
+                echo "IPA file not found in expected location"
+                exit 1
+            fi
+        fi
+        
+        echo "Uploading IPA: $IPA_PATH"
+        
+        # Upload to Firebase App Distribution with enhanced error handling - same as private repo
         firebase appdistribution:distribute "$IPA_PATH" \
           --app ${{ secrets.FIREBASE_APP_ID }} \
           --project ${{ secrets.FIREBASE_PROJECT_ID }} \
@@ -308,7 +325,7 @@ jobs:
         3. Go to Settings > General > VPN & Device Management
         4. Trust 'Oscar Wright' developer profile
         
-        ⏰ Note: This build expires in 7 days." || {
+        ⏰ Note: This build expires in 7 days. A new build will be automatically created." || {
           echo "Firebase upload failed - checking permissions and setup"
           echo "Service account roles needed: Firebase App Distribution Admin, Editor"
           exit 1
