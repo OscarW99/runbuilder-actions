@@ -278,58 +278,22 @@ jobs:
         # Create service account file
         echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service-account.json
         
-        # Authenticate with Firebase (no need to set project - we'll specify it in commands)
+        # Try using gcloud auth instead of Firebase CLI auth
+        echo "=== Trying gcloud authentication ==="
+        # Install gcloud CLI
+        curl https://sdk.cloud.google.com | bash
+        exec -l $SHELL
+        gcloud auth activate-service-account --key-file=service-account.json
+        gcloud config set project ${{ secrets.FIREBASE_PROJECT_ID }}
+        
+        # Now try Firebase with the authenticated gcloud session
         export GOOGLE_APPLICATION_CREDENTIALS="service-account.json"
         
-        # Debug Firebase setup
-        echo "=== Firebase Project Setup ==="
-        firebase projects:list || echo "Failed to list projects - check service account permissions"
-        
-        # Debug current working directory and IPA path
-        echo "=== Current working directory ==="
-        pwd
-        echo "=== IPA_PATH environment variable ==="
-        echo "IPA_PATH: $IPA_PATH"
-        echo "=== Checking if IPA file exists ==="
-        ls -la "$IPA_PATH" || echo "IPA file not found at specified path"
-        
-        # Check if IPA exists
-        if [ ! -f "$IPA_PATH" ]; then
-            echo "ERROR: IPA file not found at $IPA_PATH"
-            echo "Looking for IPA files in private-repo/runbuilder/build/ directory..."
-            ls -la private-repo/runbuilder/build/ || echo "private-repo/runbuilder/build/ directory not found"
-            
-            # Try to find IPA file in the expected location
-            if [ -f "private-repo/runbuilder/build/runbuilder.ipa" ]; then
-                echo "Found IPA at private-repo/runbuilder/build/runbuilder.ipa, updating IPA_PATH"
-                IPA_PATH="private-repo/runbuilder/build/runbuilder.ipa"
-            else
-                echo "IPA file not found in expected location"
-                exit 1
-            fi
-        fi
-        
-        echo "Uploading IPA: $IPA_PATH"
-        
-        # Upload to Firebase App Distribution with enhanced error handling
+        # Upload to Firebase App Distribution
         firebase appdistribution:distribute "$IPA_PATH" \
           --app ${{ secrets.FIREBASE_APP_ID }} \
           --project ${{ secrets.FIREBASE_PROJECT_ID }} \
-          --release-notes "🚀 RunBuilder iOS Build #${{ github.run_number }}
-        
-        📋 What's New: ${{ github.event.inputs.release_notes || 'Auto-rebuild to prevent expiration' }}
-        
-        📲 Install Instructions:
-        1. Tap the download link in the email/notification
-        2. Install the app on your device
-        3. Go to Settings > General > VPN & Device Management
-        4. Trust 'Oscar Wright' developer profile
-        
-        ⏰ Note: This build expires in 7 days. A new build will be automatically created." || {
-          echo "Firebase upload failed - checking permissions and setup"
-          echo "Service account roles needed: Firebase App Distribution Admin, Editor"
-          exit 1
-        }
+          --release-notes "🚀 RunBuilder iOS Build #${{ github.run_number }} - Latest updates"
           
     - name: Create Release Notes
       run: |
