@@ -284,6 +284,7 @@ jobs:
         echo "=== Validating service account JSON ==="
         if jq empty service-account.json; then
           echo "✅ Service account JSON is valid"
+          cat service-account.json | jq .client_email
         else
           echo "❌ Service account JSON is invalid, trying base64 decode..."
           echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | base64 -d > service-account.json 2>/dev/null || {
@@ -292,12 +293,17 @@ jobs:
           }
         fi
         
-        # Authenticate with Firebase using the exact same method as private repo
-        export GOOGLE_APPLICATION_CREDENTIALS="service-account.json"
+        # Set absolute path for service account
+        export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
+        echo "Using service account: $GOOGLE_APPLICATION_CREDENTIALS"
         
-        # Debug Firebase setup
-        echo "=== Firebase Project Setup ==="
-        firebase projects:list || echo "Failed to list projects - check service account permissions"
+        # Explicitly set Firebase project
+        echo "=== Setting Firebase project ==="
+        firebase use ${{ secrets.FIREBASE_PROJECT_ID }}
+        
+        # Test Firebase connection
+        echo "=== Testing Firebase connection ==="
+        firebase projects:list 2>/dev/null || echo "Projects list failed, but continuing with upload"
         
         # Debug current working directory and IPA path
         echo "=== Current working directory ==="
@@ -325,7 +331,12 @@ jobs:
         
         echo "Uploading IPA: $IPA_PATH"
         
-        # Upload to Firebase App Distribution with enhanced error handling - same as private repo
+        # Upload to Firebase App Distribution with enhanced error handling
+        echo "=== Starting Firebase Upload ==="
+        echo "Project ID: ${{ secrets.FIREBASE_PROJECT_ID }}"
+        echo "App ID: ${{ secrets.FIREBASE_APP_ID }}"
+        echo "IPA Path: $IPA_PATH"
+        
         firebase appdistribution:distribute "$IPA_PATH" \
           --app ${{ secrets.FIREBASE_APP_ID }} \
           --project ${{ secrets.FIREBASE_PROJECT_ID }} \
@@ -340,8 +351,12 @@ jobs:
         4. Trust 'Oscar Wright' developer profile
         
         ⏰ Note: This build expires in 7 days. A new build will be automatically created." || {
-          echo "Firebase upload failed - checking permissions and setup"
-          echo "Service account roles needed: Firebase App Distribution Admin, Editor"
+          echo "Firebase upload failed - checking service account file..."
+          echo "Service account file exists: $(test -f service-account.json && echo 'YES' || echo 'NO')"
+          echo "Service account file size: $(wc -c < service-account.json || echo 'unknown')"
+          echo "GOOGLE_APPLICATION_CREDENTIALS: $GOOGLE_APPLICATION_CREDENTIALS"
+          echo "Project ID: ${{ secrets.FIREBASE_PROJECT_ID }}"
+          echo "App ID: ${{ secrets.FIREBASE_APP_ID }}"
           exit 1
         }
           
