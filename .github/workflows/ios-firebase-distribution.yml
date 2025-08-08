@@ -278,6 +278,15 @@ jobs:
         # Create service account file - EXACT same method as working private repo
         echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service-account.json
         
+        # QUICK DIAGNOSIS - Compare with working private repo
+        echo "=== SERVICE ACCOUNT DIAGNOSIS ==="
+        echo "File size: $(wc -c < service-account.json)"
+        echo "First 100 chars: $(head -c 100 service-account.json)"
+        echo "Last 50 chars: $(tail -c 50 service-account.json)"
+        echo "Has proper JSON structure: $(jq empty service-account.json 2>&1 || echo 'INVALID JSON')"
+        echo "Project ID from file: $(jq -r .project_id service-account.json 2>/dev/null || echo 'FAILED TO EXTRACT')"
+        echo "Client email from file: $(jq -r .client_email service-account.json 2>/dev/null || echo 'FAILED TO EXTRACT')"
+        
         # Authenticate with Firebase - EXACT same method as working private repo
         export GOOGLE_APPLICATION_CREDENTIALS="service-account.json"
         
