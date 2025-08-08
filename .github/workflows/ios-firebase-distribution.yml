@@ -275,8 +275,22 @@ jobs:
         FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
       run: |
-        # Create service account file - use base64 encoding to avoid JSON formatting issues
-        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | base64 -d > service-account.json 2>/dev/null || echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service-account.json
+        # Create service account file with proper JSON formatting
+        cat > service-account.json << 'EOF'
+        ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        EOF
+        
+        # Validate the JSON file was created correctly
+        echo "=== Validating service account JSON ==="
+        if jq empty service-account.json; then
+          echo "✅ Service account JSON is valid"
+        else
+          echo "❌ Service account JSON is invalid, trying base64 decode..."
+          echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | base64 -d > service-account.json 2>/dev/null || {
+            echo "❌ Base64 decode failed, using raw content..."
+            echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service-account.json
+          }
+        fi
         
         # Authenticate with Firebase using the exact same method as private repo
         export GOOGLE_APPLICATION_CREDENTIALS="service-account.json"
