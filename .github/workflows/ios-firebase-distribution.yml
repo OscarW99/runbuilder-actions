@@ -279,21 +279,40 @@ jobs:
         echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service-account.json
         
         # Try using gcloud auth instead of Firebase CLI auth
-        echo "=== Trying gcloud authentication ==="
+        echo "=== Installing and configuring gcloud ==="
         # Install gcloud CLI
         curl https://sdk.cloud.google.com | bash
-        exec -l $SHELL
+        
+        # Add gcloud to PATH for this session
+        export PATH="/Users/runner/google-cloud-sdk/bin:$PATH"
+        
+        # Authenticate with service account
         gcloud auth activate-service-account --key-file=service-account.json
         gcloud config set project ${{ secrets.FIREBASE_PROJECT_ID }}
         
-        # Now try Firebase with the authenticated gcloud session
+        # Set environment variable for Firebase CLI
         export GOOGLE_APPLICATION_CREDENTIALS="service-account.json"
         
+        echo "=== Uploading to Firebase App Distribution ==="
         # Upload to Firebase App Distribution
         firebase appdistribution:distribute "$IPA_PATH" \
           --app ${{ secrets.FIREBASE_APP_ID }} \
           --project ${{ secrets.FIREBASE_PROJECT_ID }} \
-          --release-notes "🚀 RunBuilder iOS Build #${{ github.run_number }} - Latest updates"
+          --release-notes "🚀 RunBuilder iOS Build #${{ github.run_number }}
+        
+        📋 What's New: ${{ github.event.inputs.release_notes || 'Auto-rebuild to prevent expiration' }}
+        
+        📲 Install Instructions:
+        1. Tap the download link in the email/notification
+        2. Install the app on your device
+        3. Go to Settings > General > VPN & Device Management
+        4. Trust 'Oscar Wright' developer profile
+        
+        ⏰ Note: This build expires in 7 days." || {
+          echo "Firebase upload failed - checking permissions and setup"
+          echo "Service account roles needed: Firebase App Distribution Admin, Editor"
+          exit 1
+        }
           
     - name: Create Release Notes
       run: |
