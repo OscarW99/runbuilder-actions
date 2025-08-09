@@ -272,13 +272,16 @@ jobs:
         echo "Firebase CLI installed"
         firebase --version
         
-        # Install Google Cloud SDK for better authentication
-        echo "Installing Google Cloud SDK..."
-        curl https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-cli-456.0.0-darwin-arm.tar.gz | tar xz
-        ./google-cloud-sdk/install.sh --quiet --path-update=true
-        export PATH="$PWD/google-cloud-sdk/bin:$PATH"
-        echo "Google Cloud SDK installed"
-        gcloud --version
+        # Use the official Google Cloud SDK setup action instead of manual install
+        echo "Setting up Google Cloud authentication..."
+        # We'll use the service account directly with Firebase CLI
+        echo "Google Cloud SDK setup will be handled via service account JSON"
+        
+    - name: Authenticate with Google Cloud
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        project_id: ${{ secrets.FIREBASE_PROJECT_ID }}
         
     - name: Upload to Firebase App Distribution  
       env:
@@ -287,9 +290,6 @@ jobs:
         FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
       run: |
         cd private-repo/runbuilder
-        
-        # Add gcloud to PATH if installed
-        export PATH="$PWD/../../google-cloud-sdk/bin:$PATH"
         
         echo "[DEBUG] =================================="
         echo "[DEBUG] SECURE SECRET VERIFICATION"
@@ -417,21 +417,13 @@ jobs:
         echo "Testing firebase auth with environment variable..."
         firebase projects:list 2>&1 || echo "Method 1 failed"
         
-        echo " Step 10: Firebase authentication test (method 2 - gcloud auth activation)"
-        echo "Testing gcloud auth activation with service account..."
-        if command -v gcloud >/dev/null 2>&1; then
-            gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS" 2>&1 || echo "gcloud auth failed"
-            firebase projects:list 2>&1 || echo "Method 2 failed"
-        else
-            echo "gcloud not available, skipping method 2"
-        fi
+        echo " Step 10: Firebase authentication test (method 2 - different approach)"
+        echo "Testing firebase auth with explicit project..."
+        firebase projects:list --project="$FIREBASE_PROJECT_ID" 2>&1 || echo "Method 2 failed"
         
-        echo " Step 11: Firebase token authentication"
-        echo "Setting FIREBASE_TOKEN environment variable..."
-        # Use the correct way to authenticate with service account in Firebase CLI
-        export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
-        # Test if authentication works now
-        firebase projects:list 2>&1 || echo "Authentication still failing"
+        echo " Step 11: Firebase authentication test (method 3 - debug mode)"
+        echo "Testing firebase auth with debug output..."
+        firebase --debug projects:list 2>&1 | head -20 || echo "Method 3 failed"
         
         echo " Step 12: IPA file verification"
         echo "IPA_PATH variable: '$IPA_PATH'"
@@ -486,19 +478,25 @@ jobs:
           exit 0
         } || echo "[ERROR] Method 2 failed"
         
-        echo " Upload Method 3: With token (if generated)"
-        if [ "$FIREBASE_TOKEN" != "Token generation failed" ] && [ -n "$FIREBASE_TOKEN" ]; then
-            firebase appdistribution:distribute "$IPA_PATH" \
-              --app "$FIREBASE_APP_ID" \
-              --project "$FIREBASE_PROJECT_ID" \
-              --token "$FIREBASE_TOKEN" \
-              --release-notes " RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
-              echo "[SUCCESS] Method 3 SUCCESS!"
-              exit 0
-            } || echo "[ERROR] Method 3 failed"
-        else
-            echo "[ERROR] Method 3 skipped - no valid token"
-        fi
+        echo " Upload Method 3: Using Google Cloud auth action credentials"
+        echo "Trying with Google Cloud auth action credentials..."
+        firebase appdistribution:distribute "$IPA_PATH" \
+          --app "$FIREBASE_APP_ID" \
+          --project "$FIREBASE_PROJECT_ID" \
+          --release-notes " RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
+          echo "[SUCCESS] Method 3 SUCCESS!"
+          exit 0
+        } || echo "[ERROR] Method 3 failed"
+        
+        echo " Upload Method 4: Using alternative authentication"
+        echo "Trying alternative Firebase authentication approach..."
+        GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json" firebase appdistribution:distribute "$IPA_PATH" \
+          --app "$FIREBASE_APP_ID" \
+          --project "$FIREBASE_PROJECT_ID" \
+          --release-notes " RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
+          echo "[SUCCESS] Method 4 SUCCESS!"
+          exit 0
+        } || echo "[ERROR] Method 4 failed"
         
         echo " =================================="
         echo " ALL METHODS FAILED - FINAL DEBUG"
