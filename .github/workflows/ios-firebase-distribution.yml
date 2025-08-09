@@ -13,21 +13,8 @@ on:
 
 jobs:
   build-ios:
-    name: Build & Distribute iO        echo "🔍 Upload Method 3: Using gcloud auth if available"
-        if command -v gcloud >/dev/null 2>&1; then
-            echo "Activating gcloud service account..."
-            gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS" 2>&1 || echo "gcloud auth failed"
-            
-            firebase appdistribution:distribute "$IPA_PATH" \
-              --app "$FIREBASE_APP_ID" \
-              --project "$FIREBASE_PROJECT_ID" \
-              --release-notes "🚀 RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
-              echo "✅ Method 3 SUCCESS!"
-              exit 0
-            } || echo "❌ Method 3 failed"
-        else
-            echo "❌ Method 3 skipped - gcloud not available"
-        fins-on: macos-14  # Use specific macOS version instead of latest
+    name: Build & Distribute iOS App
+    runs-on: macos-14  # Use specific macOS version instead of latest
     
     steps:
     - name: Checkout private repository
@@ -304,70 +291,70 @@ jobs:
         # Add gcloud to PATH if installed
         export PATH="$PWD/../../google-cloud-sdk/bin:$PATH"
         
-        echo "🔍 =================================="
-        echo "🔍 SECURE SECRET VERIFICATION"
-        echo "🔍 =================================="
+        echo "[DEBUG] =================================="
+        echo "[DEBUG] SECURE SECRET VERIFICATION"
+        echo "[DEBUG] =================================="
         
         # Hash-based verification to ensure secrets are present without exposing them
-        echo "� Verifying secret integrity using hash verification..."
+        echo " Verifying secret integrity using hash verification..."
         
         # Verify FIREBASE_SERVICE_ACCOUNT (use shasum on macOS)
         SA_HASH=$(echo -n "$FIREBASE_SERVICE_ACCOUNT" | shasum -a 256 | cut -d' ' -f1)
         echo "FIREBASE_SERVICE_ACCOUNT hash: ${SA_HASH:0:16}...${SA_HASH:48:16}"
         if [ ${#SA_HASH} -eq 64 ]; then
-            echo "✅ FIREBASE_SERVICE_ACCOUNT: Present and valid length"
+            echo "[SUCCESS] FIREBASE_SERVICE_ACCOUNT: Present and valid length"
         else
-            echo "❌ FIREBASE_SERVICE_ACCOUNT: Missing or invalid"
+            echo "[ERROR] FIREBASE_SERVICE_ACCOUNT: Missing or invalid"
         fi
         
         # Verify FIREBASE_PROJECT_ID
         PROJECT_HASH=$(echo -n "$FIREBASE_PROJECT_ID" | shasum -a 256 | cut -d' ' -f1)
         echo "FIREBASE_PROJECT_ID hash: ${PROJECT_HASH:0:16}...${PROJECT_HASH:48:16}"
         if [ ${#FIREBASE_PROJECT_ID} -gt 5 ]; then
-            echo "✅ FIREBASE_PROJECT_ID: Present (length: ${#FIREBASE_PROJECT_ID})"
+            echo "[SUCCESS] FIREBASE_PROJECT_ID: Present (length: ${#FIREBASE_PROJECT_ID})"
         else
-            echo "❌ FIREBASE_PROJECT_ID: Missing or too short"
+            echo "[ERROR] FIREBASE_PROJECT_ID: Missing or too short"
         fi
         
         # Verify FIREBASE_APP_ID
         APP_HASH=$(echo -n "$FIREBASE_APP_ID" | shasum -a 256 | cut -d' ' -f1)
         echo "FIREBASE_APP_ID hash: ${APP_HASH:0:16}...${APP_HASH:48:16}"
         if [ ${#FIREBASE_APP_ID} -gt 10 ]; then
-            echo "✅ FIREBASE_APP_ID: Present (length: ${#FIREBASE_APP_ID})"
+            echo "[SUCCESS] FIREBASE_APP_ID: Present (length: ${#FIREBASE_APP_ID})"
         else
-            echo "❌ FIREBASE_APP_ID: Missing or too short"
+            echo "[ERROR] FIREBASE_APP_ID: Missing or too short"
         fi
         
-        echo "🔍 =================================="
-        echo "🔍 ULTRA-VERBOSE FIREBASE DEBUGGING"
-        echo "🔍 =================================="
+        echo " =================================="
+        echo " ULTRA-VERBOSE FIREBASE DEBUGGING"
+        echo " =================================="
         
-        echo "🔍 Step 1: Environment verification"
+        echo " Step 1: Environment verification"
         echo "Current working directory: $(pwd)"
         echo "FIREBASE_PROJECT_ID length: ${#FIREBASE_PROJECT_ID}"
         echo "FIREBASE_APP_ID length: ${#FIREBASE_APP_ID}"
         echo "FIREBASE_SERVICE_ACCOUNT length: ${#FIREBASE_SERVICE_ACCOUNT}"
         
         # Find the actual IPA file dynamically
-        echo "🔍 Searching for IPA file..."
+        echo " Searching for IPA file..."
         IPA_FILE=$(find . -name "*.ipa" -type f | head -1)
         if [ -n "$IPA_FILE" ]; then
             IPA_PATH="$IPA_FILE"
-            echo "✅ Found IPA file: '$IPA_PATH'"
+            echo "[SUCCESS] Found IPA file: '$IPA_PATH'"
         else
             # Fallback to expected path
             IPA_PATH="build/ios/ipa/Runner.ipa"
-            echo "⚠️ No IPA found, using expected path: '$IPA_PATH'"
+            echo "[WARNING] No IPA found, using expected path: '$IPA_PATH'"
         fi
         
-        echo "🔍 Step 2: Directory structure"
+        echo " Step 2: Directory structure"
         echo "PWD: $(pwd)"
         echo "USER: $(whoami)"
         echo "PATH: $PATH"
         echo "Files in current directory:"
         ls -la
         
-        echo "🔍 Step 3: Creating service account file"
+        echo " Step 3: Creating service account file"
         echo "Writing service account to file..."
         echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service-account.json
         echo "Service account file created, details:"
@@ -375,18 +362,18 @@ jobs:
         echo "File size: $(wc -c < service-account.json) bytes"
         echo "File permissions: $(ls -la service-account.json)"
         
-        echo "🔍 Step 4: Service account file content analysis"
+        echo " Step 4: Service account file content analysis"
         echo "Service account file hash verification:"
         SA_FILE_HASH=$(shasum -a 256 service-account.json | cut -d' ' -f1)
         echo "Service account file hash: ${SA_FILE_HASH:0:16}...${SA_FILE_HASH:48:16}"
         echo "File integrity verified without exposing content"
         
-        echo "🔍 Step 5: JSON validation"
+        echo " Step 5: JSON validation"
         if command -v jq >/dev/null 2>&1; then
             echo "jq is available"
             if jq empty service-account.json 2>/dev/null; then
-                echo "✅ JSON is valid"
-                echo "🔍 Extracting fields with jq (secure verification):"
+                echo "[SUCCESS] JSON is valid"
+                echo " Extracting fields with jq (secure verification):"
                 PROJECT_ID=$(jq -r .project_id service-account.json 2>/dev/null)
                 CLIENT_EMAIL=$(jq -r .client_email service-account.json 2>/dev/null)
                 PRIVATE_KEY_ID=$(jq -r .private_key_id service-account.json 2>/dev/null)
@@ -399,38 +386,38 @@ jobs:
                 echo "type: '$SERVICE_TYPE'"
                 echo "auth_uri domain: $(echo $AUTH_URI | cut -d'/' -f3)"
             else
-                echo "❌ JSON is INVALID"
+                echo "[ERROR] JSON is INVALID"
                 echo "jq error output:"
                 jq empty service-account.json 2>&1 || true
             fi
         else
-            echo "❌ jq not available"
+            echo "[ERROR] jq not available"
             echo "Trying python JSON validation:"
             python3 -c "import json; json.load(open('service-account.json'))" 2>&1 || echo "Python JSON validation failed"
         fi
         
-        echo "🔍 Step 6: Firebase CLI availability"
+        echo " Step 6: Firebase CLI availability"
         echo "Firebase CLI location: $(which firebase || echo 'NOT FOUND')"
         echo "Firebase CLI version:"
         firebase --version 2>&1 || echo "Firebase CLI not working"
         
-        echo "🔍 Step 7: Node.js and npm info"
+        echo " Step 7: Node.js and npm info"
         echo "Node version: $(node --version 2>&1 || echo 'NOT FOUND')"
         echo "npm version: $(npm --version 2>&1 || echo 'NOT FOUND')"
         echo "Global npm packages:"
         npm list -g --depth=0 2>&1 || echo "Failed to list npm packages"
         
-        echo "🔍 Step 8: Setting authentication"
+        echo " Step 8: Setting authentication"
         export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
         echo "GOOGLE_APPLICATION_CREDENTIALS set to: '$GOOGLE_APPLICATION_CREDENTIALS'"
         echo "File exists at that path: $(test -f "$GOOGLE_APPLICATION_CREDENTIALS" && echo 'YES' || echo 'NO')"
         echo "Absolute path: $(realpath service-account.json 2>/dev/null || echo 'realpath failed')"
         
-        echo "🔍 Step 9: Firebase authentication test (method 1 - environment variable)"
+        echo " Step 9: Firebase authentication test (method 1 - environment variable)"
         echo "Testing firebase auth with environment variable..."
         firebase projects:list 2>&1 || echo "Method 1 failed"
         
-        echo "🔍 Step 10: Firebase authentication test (method 2 - gcloud auth activation)"
+        echo " Step 10: Firebase authentication test (method 2 - gcloud auth activation)"
         echo "Testing gcloud auth activation with service account..."
         if command -v gcloud >/dev/null 2>&1; then
             gcloud auth activate-service-account --key-file="$GOOGLE_APPLICATION_CREDENTIALS" 2>&1 || echo "gcloud auth failed"
@@ -439,14 +426,14 @@ jobs:
             echo "gcloud not available, skipping method 2"
         fi
         
-        echo "🔍 Step 11: Firebase token authentication"
+        echo " Step 11: Firebase token authentication"
         echo "Setting FIREBASE_TOKEN environment variable..."
         # Use the correct way to authenticate with service account in Firebase CLI
         export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
         # Test if authentication works now
         firebase projects:list 2>&1 || echo "Authentication still failing"
         
-        echo "🔍 Step 12: IPA file verification"
+        echo " Step 12: IPA file verification"
         echo "IPA_PATH variable: '$IPA_PATH'"
         echo "IPA file exists: $(test -f "$IPA_PATH" && echo 'YES' || echo 'NO')"
         if [ -f "$IPA_PATH" ]; then
@@ -455,98 +442,98 @@ jobs:
             echo "IPA file type:"
             file "$IPA_PATH" 2>&1 || echo "file command failed"
         else
-            echo "❌ IPA file not found, searching for alternatives..."
+            echo "[ERROR] IPA file not found, searching for alternatives..."
             echo "Looking for IPA files in build directory:"
             find . -name "*.ipa" -type f 2>/dev/null || echo "No IPA files found"
             echo "Contents of private-repo/runbuilder/build/:"
             ls -la private-repo/runbuilder/build/ 2>/dev/null || echo "Build directory not found"
         fi
         
-        echo "🔍 Step 13: Firebase project access test"
+        echo " Step 13: Firebase project access test"
         echo "Testing project access for: $FIREBASE_PROJECT_ID"
         firebase projects:list | grep "$FIREBASE_PROJECT_ID" 2>&1 || echo "Project not found in list"
         
-        echo "🔍 Step 14: Firebase app distribution test (dry run)"
+        echo " Step 14: Firebase app distribution test (dry run)"
         echo "Testing appdistribution command availability..."
         firebase appdistribution --help 2>&1 || echo "App distribution command not available"
         
-        echo "🔍 Step 15: Network connectivity test"
+        echo " Step 15: Network connectivity test"
         echo "Testing network connectivity to Firebase..."
         curl -s -o /dev/null -w "HTTP Status: %{http_code}, Time: %{time_total}s" https://firebase.googleapis.com/ || echo "Network test failed"
         echo ""
         
-        echo "🔍 =================================="
-        echo "🔍 ATTEMPTING FIREBASE UPLOAD"
-        echo "🔍 =================================="
+        echo " =================================="
+        echo " ATTEMPTING FIREBASE UPLOAD"
+        echo " =================================="
         
         # Try multiple upload methods
-        echo "🔍 Upload Method 1: Standard approach"
+        echo " Upload Method 1: Standard approach"
         firebase appdistribution:distribute "$IPA_PATH" \
           --app "$FIREBASE_APP_ID" \
           --project "$FIREBASE_PROJECT_ID" \
-          --release-notes "🚀 RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
-          echo "✅ Method 1 SUCCESS!"
+          --release-notes " RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
+          echo "[SUCCESS] Method 1 SUCCESS!"
           exit 0
-        } || echo "❌ Method 1 failed"
+        } || echo "[ERROR] Method 1 failed"
         
-        echo "🔍 Upload Method 2: With debug flag"
+        echo " Upload Method 2: With debug flag"
         firebase appdistribution:distribute "$IPA_PATH" \
           --app "$FIREBASE_APP_ID" \
           --project "$FIREBASE_PROJECT_ID" \
           --debug \
-          --release-notes "🚀 RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
-          echo "✅ Method 2 SUCCESS!"
+          --release-notes " RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
+          echo "[SUCCESS] Method 2 SUCCESS!"
           exit 0
-        } || echo "❌ Method 2 failed"
+        } || echo "[ERROR] Method 2 failed"
         
-        echo "� Upload Method 3: With token (if generated)"
+        echo " Upload Method 3: With token (if generated)"
         if [ "$FIREBASE_TOKEN" != "Token generation failed" ] && [ -n "$FIREBASE_TOKEN" ]; then
             firebase appdistribution:distribute "$IPA_PATH" \
               --app "$FIREBASE_APP_ID" \
               --project "$FIREBASE_PROJECT_ID" \
               --token "$FIREBASE_TOKEN" \
-              --release-notes "🚀 RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
-              echo "✅ Method 3 SUCCESS!"
+              --release-notes " RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
+              echo "[SUCCESS] Method 3 SUCCESS!"
               exit 0
-            } || echo "❌ Method 3 failed"
+            } || echo "[ERROR] Method 3 failed"
         else
-            echo "❌ Method 3 skipped - no valid token"
+            echo "[ERROR] Method 3 skipped - no valid token"
         fi
         
-        echo "🔍 =================================="
-        echo "🔍 ALL METHODS FAILED - FINAL DEBUG"
-        echo "🔍 =================================="
+        echo " =================================="
+        echo " ALL METHODS FAILED - FINAL DEBUG"
+        echo " =================================="
         
-        echo "🔍 Final environment dump (secure):"
+        echo " Final environment dump (secure):"
         echo "Environment variables containing Firebase/Google (count only):"
         env | grep -E "(FIREBASE|GOOGLE|GCLOUD)" | wc -l
         echo "FIREBASE_PROJECT_ID present: $([ -n "$FIREBASE_PROJECT_ID" ] && echo 'YES' || echo 'NO')"
         echo "FIREBASE_APP_ID present: $([ -n "$FIREBASE_APP_ID" ] && echo 'YES' || echo 'NO')"
         echo "GOOGLE_APPLICATION_CREDENTIALS present: $([ -n "$GOOGLE_APPLICATION_CREDENTIALS" ] && echo 'YES' || echo 'NO')"
         
-        echo "🔍 Final file system state:"
+        echo " Final file system state:"
         echo "Current directory contents:"
         ls -la
         echo "Service account file final state:"
         ls -la service-account.json 2>/dev/null || echo "Service account file missing"
         
-        echo "🔍 Firebase CLI final diagnostics:"
+        echo " Firebase CLI final diagnostics:"
         firebase --version 2>&1 || echo "Firebase CLI not available"
         firebase projects:list 2>&1 | head -10 || echo "Cannot list projects"
         
-        echo "🔍 =================================="
-        echo "🔍 FAILURE - EXITING WITH ERROR"
-        echo "🔍 =================================="
+        echo " =================================="
+        echo " FAILURE - EXITING WITH ERROR"
+        echo " =================================="
         exit 1
           
     - name: Create Release Notes
       run: |
-        echo "🎉 iOS build completed successfully!" >> release_notes.txt
-        echo "📱 Build #${{ github.run_number }}" >> release_notes.txt
-        echo "� Download the IPA from GitHub Actions artifacts" >> release_notes.txt
-        echo "📋 Release Notes: ${{ github.event.inputs.release_notes || 'Auto-rebuild to prevent expiration' }}" >> release_notes.txt
+        echo " iOS build completed successfully!" >> release_notes.txt
+        echo " Build #${{ github.run_number }}" >> release_notes.txt
+        echo " Download the IPA from GitHub Actions artifacts" >> release_notes.txt
+        echo " Release Notes: ${{ github.event.inputs.release_notes || 'Auto-rebuild to prevent expiration' }}" >> release_notes.txt
         echo "" >> release_notes.txt
-        echo "📲 Installation Instructions:" >> release_notes.txt
+        echo " Installation Instructions:" >> release_notes.txt
         echo "1. Download the IPA file from the Actions artifacts" >> release_notes.txt
         echo "2. Install using Xcode, TestFlight, or a device management tool" >> release_notes.txt
         echo "3. Trust the developer profile in Settings > General > VPN & Device Management" >> release_notes.txt
