@@ -357,30 +357,53 @@ jobs:
         echo "Service account file hash: ${SA_FILE_HASH:0:16}...${SA_FILE_HASH:48:16}"
         echo "File integrity verified without exposing content"
         
-        echo " Step 4.1: Private key format validation"
-        echo "Checking private key format in service account..."
-        PRIVATE_KEY_START=$(jq -r .private_key service-account.json 2>/dev/null | head -c 50)
-        echo "Private key starts with: ${PRIVATE_KEY_START:0:30}..."
+        echo " Step 4.1: Advanced private key format fixing"
+        echo "Creating properly formatted service account file from scratch..."
         
-        # Check if private key has proper line breaks
-        PRIVATE_KEY_LINES=$(jq -r .private_key service-account.json 2>/dev/null | wc -l)
-        echo "Private key line count: $PRIVATE_KEY_LINES"
+        # Extract all components from the original service account
+        PROJECT_ID_RAW=$(jq -r .project_id service-account.json 2>/dev/null)
+        CLIENT_EMAIL_RAW=$(jq -r .client_email service-account.json 2>/dev/null)
+        PRIVATE_KEY_ID_RAW=$(jq -r .private_key_id service-account.json 2>/dev/null)
+        CLIENT_ID_RAW=$(jq -r .client_id service-account.json 2>/dev/null)
+        CLIENT_X509_CERT_URL_RAW=$(jq -r .client_x509_cert_url service-account.json 2>/dev/null)
         
-        # Try to fix common private key formatting issues
-        echo "Attempting to fix private key formatting..."
-        jq -r .private_key service-account.json 2>/dev/null | sed 's/\\n/\n/g' > /tmp/test_private_key.pem
-        echo "Fixed private key preview:"
-        head -3 /tmp/test_private_key.pem
-        echo "..."
-        tail -3 /tmp/test_private_key.pem
+        # Extract and aggressively fix the private key
+        echo "Extracting and fixing private key..."
+        PRIVATE_KEY_RAW=$(jq -r .private_key service-account.json 2>/dev/null)
         
-        # Create a corrected service account file
-        echo "Creating corrected service account file..."
-        FIXED_PRIVATE_KEY=$(jq -r .private_key service-account.json | sed 's/\\n/\n/g')
-        jq --arg pk "$FIXED_PRIVATE_KEY" '.private_key = $pk' service-account.json > service-account-fixed.json
+        # Multiple aggressive fixes for private key format
+        echo "Applying multiple private key fixes..."
         
-        echo "Using corrected service account file..."
-        cp service-account-fixed.json service-account.json
+        # 1. Fix escaped newlines
+        PRIVATE_KEY_FIXED=$(echo "$PRIVATE_KEY_RAW" | sed 's/\\n/\n/g')
+        
+        # 2. Remove any extra spaces or tabs
+        PRIVATE_KEY_FIXED=$(echo "$PRIVATE_KEY_FIXED" | sed 's/[ \t]*$//')
+        
+        # 3. Ensure proper line structure
+        echo "$PRIVATE_KEY_FIXED" > /tmp/temp_key.pem
+        
+        # 4. Validate and clean the key using openssl if possible
+        if openssl rsa -in /tmp/temp_key.pem -noout 2>/dev/null; then
+            echo "Private key is valid RSA format"
+            PRIVATE_KEY_FINAL=$(cat /tmp/temp_key.pem)
+        else
+            echo "RSA validation failed, trying as-is..."
+            PRIVATE_KEY_FINAL="$PRIVATE_KEY_FIXED"
+        fi
+        
+        # 5. Create a completely new service account JSON from scratch using printf
+        echo "Building new service account JSON from components..."
+        printf '{\n  "type": "service_account",\n  "project_id": "%s",\n  "private_key_id": "%s",\n  "private_key": "%s",\n  "client_email": "%s",\n  "client_id": "%s",\n  "auth_uri": "https://accounts.google.com/o/oauth2/auth",\n  "token_uri": "https://oauth2.googleapis.com/token",\n  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",\n  "client_x509_cert_url": "%s"\n}' "$PROJECT_ID_RAW" "$PRIVATE_KEY_ID_RAW" "$PRIVATE_KEY_FINAL" "$CLIENT_EMAIL_RAW" "$CLIENT_ID_RAW" "$CLIENT_X509_CERT_URL_RAW" > service-account-new.json
+        
+        echo "Using rebuilt service account file..."
+        cp service-account-new.json service-account.json
+        
+        echo "Final private key validation:"
+        FINAL_KEY_START=$(jq -r .private_key service-account.json | head -c 50)
+        echo "Final private key starts: ${FINAL_KEY_START:0:30}..."
+        FINAL_KEY_LINES=$(jq -r .private_key service-account.json | wc -l)
+        echo "Final private key line count: $FINAL_KEY_LINES"
         
         echo " Step 5: JSON validation"
         if command -v jq >/dev/null 2>&1; then
@@ -502,14 +525,85 @@ jobs:
             echo "[ERROR] Could not get Firebase token"
         fi
         
-        echo " Upload Method 3: Basic approach with environment"
+        echo " Upload Method 4: Rebuild service account with raw components"
+        echo "Creating service account from environment variable components..."
+        
+        # Extract the raw service account secret and rebuild it manually
+        echo "Extracting components directly from secret..."
+        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | jq -r '.project_id' > /tmp/project_id.txt
+        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | jq -r '.private_key_id' > /tmp/private_key_id.txt
+        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | jq -r '.client_email' > /tmp/client_email.txt
+        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | jq -r '.client_id' > /tmp/client_id.txt
+        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | jq -r '.client_x509_cert_url' > /tmp/client_x509_cert_url.txt
+        
+        # Handle private key very carefully
+        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' | jq -r '.private_key' | sed 's/\\n/\n/g' > /tmp/private_key_raw.pem
+        
+        # Read components
+        PROJECT_ID_COMP=$(cat /tmp/project_id.txt)
+        PRIVATE_KEY_ID_COMP=$(cat /tmp/private_key_id.txt)
+        CLIENT_EMAIL_COMP=$(cat /tmp/client_email.txt)
+        CLIENT_ID_COMP=$(cat /tmp/client_id.txt)
+        CLIENT_X509_CERT_URL_COMP=$(cat /tmp/client_x509_cert_url.txt)
+        PRIVATE_KEY_COMP=$(cat /tmp/private_key_raw.pem)
+        
+        # Create service account with proper escaping
+        python3 << 'PYTHONEOF'
+        import json
+        import os
+        
+        # Read the private key properly
+        with open('/tmp/private_key_raw.pem', 'r') as f:
+            private_key = f.read().strip()
+        
+        # Read other components
+        project_id = open('/tmp/project_id.txt').read().strip()
+        private_key_id = open('/tmp/private_key_id.txt').read().strip()
+        client_email = open('/tmp/client_email.txt').read().strip()
+        client_id = open('/tmp/client_id.txt').read().strip()
+        client_x509_cert_url = open('/tmp/client_x509_cert_url.txt').read().strip()
+        
+        # Create the service account dictionary
+        service_account = {
+            "type": "service_account",
+            "project_id": project_id,
+            "private_key_id": private_key_id,
+            "private_key": private_key,
+            "client_email": client_email,
+            "client_id": client_id,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+            "client_x509_cert_url": client_x509_cert_url
+        }
+        
+        # Write to file with proper JSON formatting
+        with open('service-account-python.json', 'w') as f:
+            json.dump(service_account, f, indent=2)
+        
+        print("Service account created with Python")
+        PYTHONEOF
+        
+        echo "Using Python-generated service account..."
+        export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account-python.json"
+        
         firebase appdistribution:distribute "$IPA_PATH" \
           --app "$FIREBASE_APP_ID" \
           --project "$FIREBASE_PROJECT_ID" \
           --release-notes "RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
-          echo "[SUCCESS] Method 3 SUCCESS!"
+          echo "[SUCCESS] Method 4 SUCCESS!"
           exit 0
-        } || echo "[ERROR] Method 3 failed"
+        } || echo "[ERROR] Method 4 failed"
+        
+        echo " Upload Method 5: Direct environment approach"
+        echo " Upload Method 5: Direct environment approach"
+        firebase appdistribution:distribute "$IPA_PATH" \
+          --app "$FIREBASE_APP_ID" \
+          --project "$FIREBASE_PROJECT_ID" \
+          --release-notes "RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
+          echo "[SUCCESS] Method 5 SUCCESS!"
+          exit 0
+        } || echo "[ERROR] Method 5 failed"
         
         echo " =================================="
         echo " ALL METHODS FAILED - FINAL DEBUG"
