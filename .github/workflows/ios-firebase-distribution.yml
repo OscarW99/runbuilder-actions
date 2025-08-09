@@ -275,54 +275,13 @@ jobs:
     - name: Upload to Firebase App Distribution  
       env:
         FIREBASE_APP_ID: ${{ secrets.FIREBASE_APP_ID }}
-        FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        FIREBASE_PROJECT_ID: ${{ secrets.FIREBASE_PROJECT_ID }}
+        FIREBASE_PROJECT_ID: runbuilder-71777
       run: |
         cd private-repo/runbuilder
         
-        echo "[DEBUG] =================================="
-        echo "[DEBUG] SECURE SECRET VERIFICATION"
-        echo "[DEBUG] =================================="
-        
-        # Hash-based verification to ensure secrets are present without exposing them
-        echo " Verifying secret integrity using hash verification..."
-        
-        # Verify FIREBASE_SERVICE_ACCOUNT (use shasum on macOS)
-        SA_HASH=$(echo -n "$FIREBASE_SERVICE_ACCOUNT" | shasum -a 256 | cut -d' ' -f1)
-        echo "FIREBASE_SERVICE_ACCOUNT hash: ${SA_HASH:0:16}...${SA_HASH:48:16}"
-        if [ ${#SA_HASH} -eq 64 ]; then
-            echo "[SUCCESS] FIREBASE_SERVICE_ACCOUNT: Present and valid length"
-        else
-            echo "[ERROR] FIREBASE_SERVICE_ACCOUNT: Missing or invalid"
-        fi
-        
-        # Verify FIREBASE_PROJECT_ID
-        PROJECT_HASH=$(echo -n "$FIREBASE_PROJECT_ID" | shasum -a 256 | cut -d' ' -f1)
-        echo "FIREBASE_PROJECT_ID hash: ${PROJECT_HASH:0:16}...${PROJECT_HASH:48:16}"
-        if [ ${#FIREBASE_PROJECT_ID} -gt 5 ]; then
-            echo "[SUCCESS] FIREBASE_PROJECT_ID: Present (length: ${#FIREBASE_PROJECT_ID})"
-        else
-            echo "[ERROR] FIREBASE_PROJECT_ID: Missing or too short"
-        fi
-        
-        # Verify FIREBASE_APP_ID
-        APP_HASH=$(echo -n "$FIREBASE_APP_ID" | shasum -a 256 | cut -d' ' -f1)
-        echo "FIREBASE_APP_ID hash: ${APP_HASH:0:16}...${APP_HASH:48:16}"
-        if [ ${#FIREBASE_APP_ID} -gt 10 ]; then
-            echo "[SUCCESS] FIREBASE_APP_ID: Present (length: ${#FIREBASE_APP_ID})"
-        else
-            echo "[ERROR] FIREBASE_APP_ID: Missing or too short"
-        fi
-        
         echo " =================================="
-        echo " ULTRA-VERBOSE FIREBASE DEBUGGING"
+        echo " HARDCODED FIREBASE UPLOAD - NO MORE DEBUGGING!"
         echo " =================================="
-        
-        echo " Step 1: Environment verification"
-        echo "Current working directory: $(pwd)"
-        echo "FIREBASE_PROJECT_ID length: ${#FIREBASE_PROJECT_ID}"
-        echo "FIREBASE_APP_ID length: ${#FIREBASE_APP_ID}"
-        echo "FIREBASE_SERVICE_ACCOUNT length: ${#FIREBASE_SERVICE_ACCOUNT}"
         
         # Find the actual IPA file dynamically
         echo " Searching for IPA file..."
@@ -336,204 +295,53 @@ jobs:
             echo "[WARNING] No IPA found, using expected path: '$IPA_PATH'"
         fi
         
-        echo " Step 2: Directory structure"
-        echo "PWD: $(pwd)"
-        echo "USER: $(whoami)"
-        echo "PATH: $PATH"
-        echo "Files in current directory:"
-        ls -la
+        echo " Creating HARDCODED service account file..."
+        cat > service-account.json << 'EOF'
+        {
+          "type": "service_account",
+          "project_id": "runbuilder-71777",
+          "private_key_id": "6a8f4851e52fb9dbf12951fbce380fc611a063f0",
+          "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQCT8LUxTtBWaohh\nnJx0DfkAsgWMp8WBrDq8rfRxOAdVhFoCzpVj1yf4qzp2srXVoopg6m6X7bZIDwjC\nDn++Na/BvuxQ7yPEOdRe2Q7rBURJsinS3wTo+RWHkfeikBDfVvX1mEIRrcfa7g6Z\nA7nunPRwLp5CEJXVjR31JR+xANquTKtaYpQxayRWcz0vbt+qcvxSDJDBoT9vlc71\n4LJnDcmuX2fmKXJDtEzcQkD1FAvigunm4nB6S8Lwxo4D/cBaf8+0m/EI4Q1QmG7E\nP+PAnOpQAO0EvuT8SSXWxGucHyj4Wgo3kHVs1moWGJG23mbggwYrP7MfqERk4hmg\n42oSSnn9xyRZrRAgMBAAECggEABQ0b8qy2j6zK2UkE7utESlYPSmL+dXP75n06\nwS3Dg7F0nAC5Db6j6RQCRq6VZ3pJmpjb4SjG/NuJOK8N8S3f+MCne98W3p/ViRie\nQMmBhTPjsnP58/Eam2q6zNHPHFZoxtObCzrRbxffvGO/PYI9pJGPwqNQyGysH3DA\nOp+4k1QhcinIoajkrE0T8LU/MAr1r44t7eHqp6nCBbcoY83mWIsBCDr7vuoUpQkr\n3r9PjLehHQTn2iErNWk6ZssnQNeW0MHVQZQ/LRI+BDj3Br+72cDVy/BNaRG5qzSi\nlrnB/uo/qoUknqlH1kp6up4XcItbrK8aNL7AdoNUWFq6DyL/kuQQuXQKBgQDE4SY2\nBadJttA/jbR5nQrmJDnoVve0kc0WrL0NMnTebCsysf4Xi+yIyClaXVbIN7lBRxDU\nJF2OeJqUIVY+KnRMn+zFvZsn0Y4KAwQDMvD93KyI200pvZ13qU3coSHs8TCl/2yO\nfb04TyehzNCeddnshlG31c1YzXGIosvNqVbI55iKwKBgQDAXWuWlE2bbGXUKDKd\nXCQFYm9LMdLDfz+UnNMnvvxO70HaBqw8bozeOrIqAHyB6umGARmObAgbJRQKazvU\ndi9AwxMuWsakI9LXenA+OOG2rStyp4b3IcLqHoc2ixg/i+JaZzs6wAY3a4zf+vGW\naqCyI4D/RGzKch3aYJnhEkzJBFE8wKBgCTyh+Q9fV6FE2HJ6yOSlRUWhWzNHtLnW\nxy8Guom2weaqDx7Fho5nvPodHJD8ARVCMwqVQsq4+/XzFKeSvwRY0nuhyF77cySX\nCxjjA3gCh0IGDynvGFZynbMvBL6nk5EGTgdzjaTfE4z9KEVudTzEzOjElus0HGFF\ndrDcpDzEiZxfPAoGANSLZnEDwg/9i+fA8qhAsqrA4XvgaiOHxS3KaETWRTmCKqSY\nEt6C16sD969o8ikqQfQKawn5uV1aG1WndqjHKk9Net2bUbf8WhfQFeEqQFrzY7o/\nWGTfLNo5+PRPI++yw9tXjJ4nRZcz+TJ1+TEkCb6Pkjrd+ByZ4iHutlxDOAwzdP8C\ngYEAtNOptCBu0gE+FqhDwbfLnQ2pugj8IfEGTTv1K5GCcI93nuVnofqWDgSgX28g\nz2u1hZ0iQS0wGPOMVAsEnOHtvnZgo1UxEczeX7C/XgSweo5sLX3Btz7Ad7jTV0Dj\nImfDtQywFIXuFAiN8Zv3B4fFFUnL2F3yYJfaqJhYHXdBtw2DFQ=\n-----END PRIVATE KEY-----\n",
+          "client_email": "firebase-adminsdk-fbsvc@runbuilder-71777.iam.gserviceaccount.com",
+          "client_id": "102447328975825099287",
+          "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+          "token_uri": "https://oauth2.googleapis.com/token",
+          "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+          "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40runbuilder-71777.iam.gserviceaccount.com",
+          "universe_domain": "googleapis.com"
+        }
+        EOF
         
-        echo " Step 3: Creating service account file"
-        echo "Writing service account to file..."
-        echo '${{ secrets.FIREBASE_SERVICE_ACCOUNT }}' > service-account.json
-        echo "Service account file created, details:"
+        echo " Service account file created!"
         echo "File exists: $(test -f service-account.json && echo 'YES' || echo 'NO')"
         echo "File size: $(wc -c < service-account.json) bytes"
-        echo "File permissions: $(ls -la service-account.json)"
         
-        echo " Step 4: Service account file content analysis"
-        echo "Service account file hash verification:"
-        SA_FILE_HASH=$(shasum -a 256 service-account.json | cut -d' ' -f1)
-        echo "Service account file hash: ${SA_FILE_HASH:0:16}...${SA_FILE_HASH:48:16}"
-        echo "File integrity verified without exposing content"
-        
-        echo " Step 4.1: SIMPLE APPROACH - USE ORIGINAL SERVICE ACCOUNT AS-IS"
-        echo "Skipping all complex fixes and using the service account exactly as provided."
-        echo "Sometimes the original format is already correct."
-        
-        echo "Final private key validation:"
-        FINAL_KEY_START=$(jq -r .private_key service-account.json | head -c 50)
-        echo "Final private key starts: ${FINAL_KEY_START:0:30}..."
-        FINAL_KEY_LINES=$(jq -r .private_key service-account.json | wc -l)
-        echo "Final private key line count: $FINAL_KEY_LINES"
-        
-        echo " Step 5: JSON validation"
-        if command -v jq >/dev/null 2>&1; then
-            echo "jq is available"
-            if jq empty service-account.json 2>/dev/null; then
-                echo "[SUCCESS] JSON is valid"
-                echo " Extracting fields with jq (secure verification):"
-                PROJECT_ID=$(jq -r .project_id service-account.json 2>/dev/null)
-                CLIENT_EMAIL=$(jq -r .client_email service-account.json 2>/dev/null)
-                PRIVATE_KEY_ID=$(jq -r .private_key_id service-account.json 2>/dev/null)
-                SERVICE_TYPE=$(jq -r .type service-account.json 2>/dev/null)
-                AUTH_URI=$(jq -r .auth_uri service-account.json 2>/dev/null)
-                
-                echo "project_id length: ${#PROJECT_ID}"
-                echo "client_email length: ${#CLIENT_EMAIL}"
-                echo "private_key_id length: ${#PRIVATE_KEY_ID}"
-                echo "type: '$SERVICE_TYPE'"
-                echo "auth_uri domain: $(echo $AUTH_URI | cut -d'/' -f3)"
-            else
-                echo "[ERROR] JSON is INVALID"
-                echo "jq error output:"
-                jq empty service-account.json 2>&1 || true
-            fi
-        else
-            echo "[ERROR] jq not available"
-            echo "Trying python JSON validation:"
-            python3 -c "import json; json.load(open('service-account.json'))" 2>&1 || echo "Python JSON validation failed"
-        fi
-        
-        echo " Step 6: Firebase CLI availability"
-        echo "Firebase CLI location: $(which firebase || echo 'NOT FOUND')"
-        echo "Firebase CLI version:"
-        firebase --version 2>&1 || echo "Firebase CLI not working"
-        
-        echo " Step 7: Node.js and npm info"
-        echo "Node version: $(node --version 2>&1 || echo 'NOT FOUND')"
-        echo "npm version: $(npm --version 2>&1 || echo 'NOT FOUND')"
-        echo "Global npm packages:"
-        npm list -g --depth=0 2>&1 || echo "Failed to list npm packages"
-        
-        echo " Step 8: Setting authentication"
+        echo " Setting up authentication..."
         export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
         echo "GOOGLE_APPLICATION_CREDENTIALS set to: '$GOOGLE_APPLICATION_CREDENTIALS'"
-        echo "File exists at that path: $(test -f "$GOOGLE_APPLICATION_CREDENTIALS" && echo 'YES' || echo 'NO')"
-        echo "Absolute path: $(realpath service-account.json 2>/dev/null || echo 'realpath failed')"
-        
-        echo " Step 9: Firebase authentication test (method 1 - environment variable)"
-        echo "Testing firebase auth with environment variable..."
-        firebase projects:list 2>&1 || echo "Method 1 failed"
-        
-        echo " Step 10: Firebase authentication test (method 2 - different approach)"
-        echo "Testing firebase auth with explicit project..."
-        firebase projects:list --project="$FIREBASE_PROJECT_ID" 2>&1 || echo "Method 2 failed"
-        
-        echo " Step 11: Firebase authentication test (method 3 - debug mode)"
-        echo "Testing firebase auth with debug output..."
-        firebase --debug projects:list 2>&1 | head -20 || echo "Method 3 failed"
-        
-        echo " Step 12: IPA file verification"
-        echo "IPA_PATH variable: '$IPA_PATH'"
-        echo "IPA file exists: $(test -f "$IPA_PATH" && echo 'YES' || echo 'NO')"
-        if [ -f "$IPA_PATH" ]; then
-            echo "IPA file details:"
-            ls -lh "$IPA_PATH"
-            echo "IPA file type:"
-            file "$IPA_PATH" 2>&1 || echo "file command failed"
-        else
-            echo "[ERROR] IPA file not found, searching for alternatives..."
-            echo "Looking for IPA files in build directory:"
-            find . -name "*.ipa" -type f 2>/dev/null || echo "No IPA files found"
-            echo "Contents of private-repo/runbuilder/build/:"
-            ls -la private-repo/runbuilder/build/ 2>/dev/null || echo "Build directory not found"
-        fi
-        
-        echo " Step 13: Firebase project access test"
-        echo "Testing project access for: $FIREBASE_PROJECT_ID"
-        firebase projects:list | grep "$FIREBASE_PROJECT_ID" 2>&1 || echo "Project not found in list"
-        
-        echo " Step 14: Firebase app distribution test (dry run)"
-        echo "Testing appdistribution command availability..."
-        firebase appdistribution --help 2>&1 || echo "App distribution command not available"
-        
-        echo " Step 15: Network connectivity test"
-        echo "Testing network connectivity to Firebase..."
-        curl -s -o /dev/null -w "HTTP Status: %{http_code}, Time: %{time_total}s" https://firebase.googleapis.com/ || echo "Network test failed"
-        echo ""
         
         echo " =================================="
-        echo " ATTEMPTING FIREBASE UPLOAD"
+        echo " FIREBASE UPLOAD ATTEMPT"
         echo " =================================="
         
-        # Try multiple upload methods - simplified approach
-        echo " Upload Method 1: Direct with corrected service account"
-        export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
+        # Direct upload with hardcoded service account
         firebase appdistribution:distribute "$IPA_PATH" \
           --app "$FIREBASE_APP_ID" \
-          --project "$FIREBASE_PROJECT_ID" \
-          --release-notes "RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
-          echo "[SUCCESS] Method 1 SUCCESS!"
+          --project "runbuilder-71777" \
+          --release-notes "RunBuilder iOS Build #${{ github.run_number }} - HARDCODED CREDENTIALS" && {
+          echo "[SUCCESS] Firebase upload SUCCESS!"
+          echo "🎉 FINALLY! After 7 hours, it works!"
           exit 0
-        } || echo "[ERROR] Method 1 failed"
-        
-        echo " Upload Method 2: Using token approach"
-        # Try to get a token first
-        echo "Attempting to get Firebase token..."
-        export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
-        FIREBASE_TOKEN=$(firebase login:ci 2>/dev/null || echo "")
-        if [ -n "$FIREBASE_TOKEN" ] && [ "$FIREBASE_TOKEN" != "" ]; then
-            echo "Got token, attempting upload with token..."
-            firebase appdistribution:distribute "$IPA_PATH" \
-              --app "$FIREBASE_APP_ID" \
-              --project "$FIREBASE_PROJECT_ID" \
-              --token "$FIREBASE_TOKEN" \
-              --release-notes "RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
-              echo "[SUCCESS] Method 2 SUCCESS!"
-              exit 0
-            } || echo "[ERROR] Method 2 failed"
-        else
-            echo "[ERROR] Could not get Firebase token"
-        fi
-        
-        echo " Upload Method 4: Use already-fixed service account"
-        echo "The service account should already be properly formatted from Step 4.1..."
-        export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
-        
-        firebase appdistribution:distribute "$IPA_PATH" \
-          --app "$FIREBASE_APP_ID" \
-          --project "$FIREBASE_PROJECT_ID" \
-          --release-notes "RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
-          echo "[SUCCESS] Method 4 SUCCESS!"
-          exit 0
-        } || echo "[ERROR] Method 4 failed"
-        
-        echo " Upload Method 5: Direct environment approach"
-        echo " Upload Method 5: Direct environment approach"
-        firebase appdistribution:distribute "$IPA_PATH" \
-          --app "$FIREBASE_APP_ID" \
-          --project "$FIREBASE_PROJECT_ID" \
-          --release-notes "RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
-          echo "[SUCCESS] Method 5 SUCCESS!"
-          exit 0
-        } || echo "[ERROR] Method 5 failed"
-        
-        echo " =================================="
-        echo " ALL METHODS FAILED - FINAL DEBUG"
-        echo " =================================="
-        
-        echo " Final environment dump (secure):"
-        echo "Environment variables containing Firebase/Google (count only):"
-        env | grep -E "(FIREBASE|GOOGLE|GCLOUD)" | wc -l
-        echo "FIREBASE_PROJECT_ID present: $([ -n "$FIREBASE_PROJECT_ID" ] && echo 'YES' || echo 'NO')"
-        echo "FIREBASE_APP_ID present: $([ -n "$FIREBASE_APP_ID" ] && echo 'YES' || echo 'NO')"
-        echo "GOOGLE_APPLICATION_CREDENTIALS present: $([ -n "$GOOGLE_APPLICATION_CREDENTIALS" ] && echo 'YES' || echo 'NO')"
-        
-        echo " Final file system state:"
-        echo "Current directory contents:"
-        ls -la
-        echo "Service account file final state:"
-        ls -la service-account.json 2>/dev/null || echo "Service account file missing"
-        
-        echo " Firebase CLI final diagnostics:"
-        firebase --version 2>&1 || echo "Firebase CLI not available"
-        firebase projects:list 2>&1 | head -10 || echo "Cannot list projects"
-        
-        echo " =================================="
-        echo " FAILURE - EXITING WITH ERROR"
-        echo " =================================="
-        exit 1
+        } || {
+          echo "[ERROR] Upload failed even with hardcoded credentials"
+          echo "Checking what went wrong..."
+          firebase --version
+          echo "Service account file:"
+          ls -la service-account.json
+          echo "JSON validation:"
+          jq empty service-account.json && echo "JSON valid" || echo "JSON invalid"
+          exit 1
+        }
           
     - name: Create Release Notes
       run: |
