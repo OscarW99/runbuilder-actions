@@ -265,23 +265,12 @@ jobs:
         path: ${{ env.IPA_PATH }}
         retention-days: 30
         
-    - name: Install Firebase CLI and Google Cloud SDK
+    - name: Install Firebase CLI
       run: |
-        # Install Firebase CLI
+        # Install Firebase CLI only - keep it simple
         npm install -g firebase-tools
         echo "Firebase CLI installed"
         firebase --version
-        
-        # Use the official Google Cloud SDK setup action instead of manual install
-        echo "Setting up Google Cloud authentication..."
-        # We'll use the service account directly with Firebase CLI
-        echo "Google Cloud SDK setup will be handled via service account JSON"
-        
-    - name: Authenticate with Google Cloud
-      uses: google-github-actions/auth@v2
-      with:
-        credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
-        project_id: ${{ secrets.FIREBASE_PROJECT_ID }}
         
     - name: Upload to Firebase App Distribution  
       env:
@@ -367,6 +356,31 @@ jobs:
         SA_FILE_HASH=$(shasum -a 256 service-account.json | cut -d' ' -f1)
         echo "Service account file hash: ${SA_FILE_HASH:0:16}...${SA_FILE_HASH:48:16}"
         echo "File integrity verified without exposing content"
+        
+        echo " Step 4.1: Private key format validation"
+        echo "Checking private key format in service account..."
+        PRIVATE_KEY_START=$(jq -r .private_key service-account.json 2>/dev/null | head -c 50)
+        echo "Private key starts with: ${PRIVATE_KEY_START:0:30}..."
+        
+        # Check if private key has proper line breaks
+        PRIVATE_KEY_LINES=$(jq -r .private_key service-account.json 2>/dev/null | wc -l)
+        echo "Private key line count: $PRIVATE_KEY_LINES"
+        
+        # Try to fix common private key formatting issues
+        echo "Attempting to fix private key formatting..."
+        jq -r .private_key service-account.json 2>/dev/null | sed 's/\\n/\n/g' > /tmp/test_private_key.pem
+        echo "Fixed private key preview:"
+        head -3 /tmp/test_private_key.pem
+        echo "..."
+        tail -3 /tmp/test_private_key.pem
+        
+        # Create a corrected service account file
+        echo "Creating corrected service account file..."
+        FIXED_PRIVATE_KEY=$(jq -r .private_key service-account.json | sed 's/\\n/\n/g')
+        jq --arg pk "$FIXED_PRIVATE_KEY" '.private_key = $pk' service-account.json > service-account-fixed.json
+        
+        echo "Using corrected service account file..."
+        cp service-account-fixed.json service-account.json
         
         echo " Step 5: JSON validation"
         if command -v jq >/dev/null 2>&1; then
@@ -458,45 +472,44 @@ jobs:
         echo " ATTEMPTING FIREBASE UPLOAD"
         echo " =================================="
         
-        # Try multiple upload methods
-        echo " Upload Method 1: Standard approach"
+        # Try multiple upload methods - simplified approach
+        echo " Upload Method 1: Direct with corrected service account"
+        export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
         firebase appdistribution:distribute "$IPA_PATH" \
           --app "$FIREBASE_APP_ID" \
           --project "$FIREBASE_PROJECT_ID" \
-          --release-notes " RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
+          --release-notes "RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
           echo "[SUCCESS] Method 1 SUCCESS!"
           exit 0
         } || echo "[ERROR] Method 1 failed"
         
-        echo " Upload Method 2: With debug flag"
-        firebase appdistribution:distribute "$IPA_PATH" \
-          --app "$FIREBASE_APP_ID" \
-          --project "$FIREBASE_PROJECT_ID" \
-          --debug \
-          --release-notes " RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
-          echo "[SUCCESS] Method 2 SUCCESS!"
-          exit 0
-        } || echo "[ERROR] Method 2 failed"
+        echo " Upload Method 2: Using token approach"
+        # Try to get a token first
+        echo "Attempting to get Firebase token..."
+        export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
+        FIREBASE_TOKEN=$(firebase login:ci 2>/dev/null || echo "")
+        if [ -n "$FIREBASE_TOKEN" ] && [ "$FIREBASE_TOKEN" != "" ]; then
+            echo "Got token, attempting upload with token..."
+            firebase appdistribution:distribute "$IPA_PATH" \
+              --app "$FIREBASE_APP_ID" \
+              --project "$FIREBASE_PROJECT_ID" \
+              --token "$FIREBASE_TOKEN" \
+              --release-notes "RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
+              echo "[SUCCESS] Method 2 SUCCESS!"
+              exit 0
+            } || echo "[ERROR] Method 2 failed"
+        else
+            echo "[ERROR] Could not get Firebase token"
+        fi
         
-        echo " Upload Method 3: Using Google Cloud auth action credentials"
-        echo "Trying with Google Cloud auth action credentials..."
+        echo " Upload Method 3: Basic approach with environment"
         firebase appdistribution:distribute "$IPA_PATH" \
           --app "$FIREBASE_APP_ID" \
           --project "$FIREBASE_PROJECT_ID" \
-          --release-notes " RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
+          --release-notes "RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
           echo "[SUCCESS] Method 3 SUCCESS!"
           exit 0
         } || echo "[ERROR] Method 3 failed"
-        
-        echo " Upload Method 4: Using alternative authentication"
-        echo "Trying alternative Firebase authentication approach..."
-        GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json" firebase appdistribution:distribute "$IPA_PATH" \
-          --app "$FIREBASE_APP_ID" \
-          --project "$FIREBASE_PROJECT_ID" \
-          --release-notes " RunBuilder iOS Build #${{ github.run_number }} - Debug Build" 2>&1 && {
-          echo "[SUCCESS] Method 4 SUCCESS!"
-          exit 0
-        } || echo "[ERROR] Method 4 failed"
         
         echo " =================================="
         echo " ALL METHODS FAILED - FINAL DEBUG"
