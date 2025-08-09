@@ -434,6 +434,56 @@ jobs:
         echo "Using Python-fixed service account file..."
         cp service-account-fixed.json service-account.json
         
+        echo " Step 4.2: ADVANCED PRIVATE KEY CRYPTO COMPATIBILITY FIX"
+        echo "Converting private key to Node.js crypto-compatible format..."
+        
+        # Extract the private key and convert it using OpenSSL
+        jq -r .private_key service-account.json > /tmp/original_private_key.pem
+        
+        echo "Original private key extracted, attempting OpenSSL conversion..."
+        
+        # Try multiple OpenSSL conversions to ensure compatibility
+        if openssl pkey -in /tmp/original_private_key.pem -out /tmp/converted_private_key.pem 2>/dev/null; then
+            echo "[SUCCESS] OpenSSL pkey conversion successful"
+            CONVERTED_KEY=$(cat /tmp/converted_private_key.pem)
+        elif openssl rsa -in /tmp/original_private_key.pem -out /tmp/converted_private_key.pem 2>/dev/null; then
+            echo "[SUCCESS] OpenSSL rsa conversion successful"
+            CONVERTED_KEY=$(cat /tmp/converted_private_key.pem)
+        elif openssl pkcs8 -in /tmp/original_private_key.pem -nocrypt -out /tmp/converted_private_key.pem 2>/dev/null; then
+            echo "[SUCCESS] OpenSSL pkcs8 conversion successful"
+            CONVERTED_KEY=$(cat /tmp/converted_private_key.pem)
+        else
+            echo "[WARNING] OpenSSL conversion failed, using original key"
+            CONVERTED_KEY=$(cat /tmp/original_private_key.pem)
+        fi
+        
+        echo "Creating service account with crypto-compatible private key..."
+        python3 << 'CRYPTO_FIX_EOF'
+        import json
+        
+        # Read the current service account
+        with open('service-account.json', 'r') as f:
+            service_account = json.load(f)
+        
+        # Read the converted private key
+        with open('/tmp/converted_private_key.pem', 'r') as f:
+            converted_key = f.read().strip()
+        
+        # Update the private key
+        service_account['private_key'] = converted_key
+        
+        # Write the updated service account
+        with open('service-account-crypto-fixed.json', 'w') as f:
+            json.dump(service_account, f, indent=2)
+        
+        print("Service account updated with crypto-compatible private key")
+        print(f"New private key length: {len(converted_key)}")
+        print(f"New private key starts: {converted_key[:50]}...")
+        CRYPTO_FIX_EOF
+        
+        echo "Using crypto-fixed service account file..."
+        cp service-account-crypto-fixed.json service-account.json
+        
         echo "Final private key validation:"
         FINAL_KEY_START=$(jq -r .private_key service-account.json | head -c 50)
         echo "Final private key starts: ${FINAL_KEY_START:0:30}..."
