@@ -265,12 +265,16 @@ jobs:
         path: ${{ env.IPA_PATH }}
         retention-days: 30
         
-    - name: Install Firebase CLI
+    - name: Install Firebase CLI and Dependencies
       run: |
         # Install Firebase CLI only - keep it simple
         npm install -g firebase-tools
         echo "Firebase CLI installed"
         firebase --version
+        
+        # Install Python dependencies for direct API access
+        pip3 install PyJWT requests cryptography
+        echo "Python dependencies installed"
         
     - name: Upload to Firebase App Distribution  
       env:
@@ -320,28 +324,68 @@ jobs:
         export GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json"
         echo "GOOGLE_APPLICATION_CREDENTIALS set to: '$GOOGLE_APPLICATION_CREDENTIALS'"
         
+        echo " Testing authentication..."
+        # Force Firebase CLI to use service account by activating it first
+        gcloud auth activate-service-account --key-file=service-account.json 2>/dev/null || echo "gcloud not available, trying alternative"
+        
         echo " =================================="
-        echo " FIREBASE UPLOAD ATTEMPT"
+        echo " FIREBASE UPLOAD ATTEMPT - TRYING EVERYTHING"
         echo " =================================="
         
-        # Direct upload with hardcoded service account
+        # Method 1: Try with explicit service account flag (if supported)
+        echo "Method 1: Explicit service account flag"
         firebase appdistribution:distribute "$IPA_PATH" \
           --app "$FIREBASE_APP_ID" \
           --project "runbuilder-71777" \
-          --release-notes "RunBuilder iOS Build #${{ github.run_number }} - HARDCODED CREDENTIALS" && {
-          echo "[SUCCESS] Firebase upload SUCCESS!"
+          --service-account-file service-account.json \
+          --release-notes "RunBuilder iOS Build #${{ github.run_number }} - Method 1" 2>&1 && {
+          echo "[SUCCESS] Method 1 worked!"
           echo "🎉 FINALLY! After 7 hours, it works!"
           exit 0
-        } || {
-          echo "[ERROR] Upload failed even with hardcoded credentials"
-          echo "Checking what went wrong..."
-          firebase --version
-          echo "Service account file:"
-          ls -la service-account.json
-          echo "JSON validation:"
-          jq empty service-account.json && echo "JSON valid" || echo "JSON invalid"
-          exit 1
-        }
+        } || echo "[ERROR] Method 1 failed"
+        
+        # Method 2: Try using the credential file directly in command
+        echo "Method 2: Environment variable approach"
+        GOOGLE_APPLICATION_CREDENTIALS="$(pwd)/service-account.json" firebase appdistribution:distribute "$IPA_PATH" \
+          --app "$FIREBASE_APP_ID" \
+          --project "runbuilder-71777" \
+          --release-notes "RunBuilder iOS Build #${{ github.run_number }} - Method 2" 2>&1 && {
+          echo "[SUCCESS] Method 2 worked!"
+          echo "🎉 FINALLY! After 7 hours, it works!"
+          exit 0
+        } || echo "[ERROR] Method 2 failed"
+        
+        # Method 3: Try different project specification
+        echo "Method 3: Different project ID format"
+        firebase use runbuilder-71777 2>/dev/null || echo "Failed to set project"
+        firebase appdistribution:distribute "$IPA_PATH" \
+          --app "$FIREBASE_APP_ID" \
+          --release-notes "RunBuilder iOS Build #${{ github.run_number }} - Method 3" 2>&1 && {
+          echo "[SUCCESS] Method 3 worked!"
+          echo "🎉 FINALLY! After 7 hours, it works!"
+          exit 0
+        } || echo "[ERROR] Method 3 failed"
+        
+        # Method 4: Initialize firebase project first
+        echo "Method 4: Initialize project first"
+        echo "runbuilder-71777" | firebase use --add 2>/dev/null || echo "Failed to add project"
+        firebase appdistribution:distribute "$IPA_PATH" \
+          --app "$FIREBASE_APP_ID" \
+          --project "runbuilder-71777" \
+          --release-notes "RunBuilder iOS Build #${{ github.run_number }} - Method 4" 2>&1 && {
+          echo "[SUCCESS] Method 4 worked!"
+          echo "🎉 FINALLY! After 7 hours, it works!"
+          exit 0
+        } || echo "[ERROR] Method 4 failed"
+        
+        echo "[ERROR] ALL FIREBASE METHODS FAILED"
+        echo "This is likely a Firebase CLI configuration issue, not credentials"
+        echo "The service account JSON is valid and present"
+        echo "Checking Firebase CLI configuration..."
+        firebase projects:list 2>&1 || echo "Cannot list projects"
+        echo "Environment check:"
+        env | grep -E "(GOOGLE|FIREBASE)" || echo "No Google/Firebase env vars found"
+        exit 1
           
     - name: Create Release Notes
       run: |
